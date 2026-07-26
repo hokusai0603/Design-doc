@@ -136,7 +136,7 @@ sequenceDiagram
         note over MTLF, Clients: 階段 4: 聯邦學習與多輪收斂 (Federated Learning)
         NWDAF->>MTLF: 11. POST /publish_task (帶入 ANLF Webhook Callback URL)
         MTLF->>Daisy: 12. 觸發 OpenDaisy Master (Port 8887) 建立 TCN 任務
-        Daisy<-->>Clients: 13. Client 0 (10087) & Client 1 (10088) gRPC 連線
+        Daisy->>Clients: 13. Client 0 (10087) & Client 1 (10088) gRPC 建立連線
         Clients->>Clients: 14. 從 Mongo 載入 321,071 筆資料進行 Local Epoch 訓練
         Clients->>Daisy: 15. 回傳 Local 權重 (ClientUploadingSignal)
         Daisy->>Daisy: 16. 執行 FedAvg 權重聚合與 EarlyStopping 評估
