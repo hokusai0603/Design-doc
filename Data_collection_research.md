@@ -1,12 +1,15 @@
 # ADAE / AIMLE 資料收集效率研究：成因、所需元件、FL 介入點與改良方向
 
 - 日期：2026-10-29
-- 依據規格（本機 `spec/` 資料夾）：
+- 依據規格（本機 `spec/` 資料夾，2026-10-30 逐條核對）：
   - TS 23.436 V20.2.0（ADAE）
   - TR 23.700-36 V18.1.0（ADAE 研究報告）
   - TS 23.482 V20.3.0（AIMLE）
   - TS 23.288 V20.2.0（NWDAF/DCCF/ADRF）
   - TS 23.433 V20.4.0（SEALDD）
+  - TS 23.434 V20.1.0（SEAL）
+  - TR 23.700-82 V19.1.0（AIMLE 研究報告）
+  - Stage 3（不在 `spec/`，取自網路）：TS 29.549 V20.1.0（SEAL/ADAE API，含 A-DCCF）、TS 29.574 V20.1.0（Ndccf）
 - 標記方式：**【規格】** 表示規格明文；**【推論】** 表示我根據規格做的分析或主張；**【文獻】** 表示網路上的研究或報導。
 
 ---
@@ -14,14 +17,14 @@
 ## 0. 摘要
 
 1. **低效率的根本原因不是「缺少一個更聰明的演算法」，而是應用層的資料收集框架少了幾塊元件**，主要有四項：
-   - **目標導向的收集規劃**：現在是 Analytics ID 到收集事件的靜態對應。
-   - **資料減量工具**：5GC 的 DCCF 已經有，ADAE 的 A-DCCF 沒有。
+   - **目標導向的收集規劃**：現在是 Analytics ID 到收集事件的靜態對應。SEAL 已有先例：位置管理（LMS）會依移動性與能耗分析調整位置回報，但只限位置資料。
+   - **資料減量工具**：5GC 的 DCCF 已經有可執行的格式化與摘要指令，ADAE 的 A-DCCF 只有需求層級的描述。
    - **資料品質與價值的描述**：兩份規格都完全沒有。
-   - **ADAE 與 AIMLE 之間的資料平面銜接**：AIMLE 觸發 A-DCCF 的方式還是 Editor's Note。
+   - **ADAE 與 AIMLE 之間的資料平面銜接**：AIMLE 觸發 A-DCCF 的方式還是 Editor's Note。研究階段（TR 23.700-82）曾設計過，正式規格沒有保留。
 2. 要提升效率，**最可能需要的元件依序是**：
    1. 收集規劃器（Collection Planner，可以由 agent 擔任）；
    2. 擴充後的 Data Producer Profile 與資料目錄（Dataset Catalog）；
-   3. A-DCCF 的減量指令集（移植 5GC TS 23.288 5A.4、6.2.6.1、6.2.7）；
+   3. A-DCCF 的減量指令集（移植 5GC DCCF 的 TS 23.288 5A.4，並參考 NWDAF 的 bulked data（6.2.6.1）與 event muting（6.2.7））；
    4. 「端側運算」模式，也就是 Federated Analytics；
    5. 從模型或分析效能回到收集策略的閉環控制。
 3. **FL 有明確的介入空間，但介入點不只是「訓練」**。最有價值的是：
@@ -38,6 +41,9 @@
 ---
 
 ## 1. 現況回顧（細節見 `ADAE/`、`AIMLE/` 中的整理）
+
+- **【規格】** ADAE 和 AIMLE 都是 SEAL service（TS 23.434 19.1、20.1）。本文說的「應用層資料收集」，指的就是 SEAL 層中這兩個服務的資料收集。
+- **【規格】** SEAL 中已有依分析結果調整資料回報的機制：位置管理（LMS）的 adaptive reporting（TS 23.434 9.3.5、9.3.20），見 RC5、RC7。
 
 | | ADAE | AIMLE |
 |---|---|---|
@@ -59,17 +65,22 @@
 ### RC2：A-DCCF 缺少 5GC DCCF 已有的「減量工具」
 
 - **【規格】** 5GC 的 DCCF 設計目的明寫是避免資料來源「handle multiple subscriptions for the same data and send multiple notifications containing the same information」（TS 23.288 5A.1）。為此它提供了一整組減量工具。
-- **【規格】** ADAE 的 A-DCCF 雖然有去重複（TS 23.436 8.12.2.1 step 3–4），但只有一個**沒有定義內容的 `Process requirements` IE**：「Requirements on processing the collected data/analytics」（Table 8.12.3.2-1）。
+- **【規格】** ADAE 的 A-DCCF 有去重複（TS 23.436 8.12.2.1 step 3–4），但減量只停在需求層級：
+  - 5.3 只寫「A-DCCF may also perform data processing/abstraction and data preparation based on the VAL server requirements」；
+  - 請求中必填的 `Data Collection requirements` 只列出「the format of data, frequency of reporting, level of abstraction of data, level of accuracy of data」；
+  - 另一個 `Process requirements` IE 只寫「Requirements on processing the collected data/analytics」（Table 8.12.3.2-1）；
+  - Stage 3 也一樣：TS 29.549 的 `ProcessingReq`（7.10.13.6.2.5）只有一個 `req: string`，描述是「Indicates the data processing requirements」。
+  - **這些都沒有定義具體的指令或參數。**
 
 | 機制 | 5GC（TS 23.288） | ADAE（TS 23.436） |
 |---|---|---|
 | 訂閱去重複、合併 | DCCF（5A.2） | A-DCCF（8.12） |
-| **格式化**：event clubbing、時間窗、跨事件觸發、consumer 觸發的 fetch、固定時間、遞增週期 | 5A.4 | **無** |
-| **摘要處理**：在 processing interval 內計算平均、變異數、偏度、最大最小值、次數等，用摘要報告取代逐筆事件 | 5A.4 | **無**（只有未定義的 Process requirements） |
-| **Bulked data**：依 Analytics ID 打包 raw 或 pre-processed 樣本，**明確區分給 training 還是 inference 用** | 6.2.6.1 | **無** |
-| **Event muting**：生產端先暫存，消費者需要時再取 | 6.2.7 | **無** |
+| **格式化**：event clubbing、時間窗、跨事件觸發、consumer 觸發的 fetch、固定時間、遞增週期 | DCCF（5A.4） | **無可執行指令**：只有 Data Collection requirements 中「format of data, frequency of reporting」的需求描述 |
+| **摘要處理**：在 processing interval 內計算平均、變異數、偏度、最大最小值、次數等，用摘要報告取代逐筆事件 | DCCF（5A.4） | **無可執行指令**：只有「level of abstraction of data」需求與未定義內容的 Process requirements |
+| **Bulked data**：依 Analytics ID 打包 raw 或 pre-processed 樣本，**明確區分給 training 還是 inference 用** | **NWDAF**（6.2.6.1，非 DCCF；目前只有 stage 2，stage 3 尚未定義） | **無** |
+| **Event muting**：生產端先暫存，消費者需要時再取 | **資料來源 NF**，DCCF、NWDAF 也可支援（6.2.7） | **無** |
 | 訊息框架（MFAF）、fetch 間接傳遞 | 5A.3 | **無** |
-| 收集頻率控制 | 以上機制都可用 | ADAE client「periodically or if a threshold is reached」（8.2.2 step 8b），由實作決定 |
+| 收集頻率控制 | 以上機制都可用 | ADAE client「periodically or if a threshold is reached based on configuration」（8.2.2 step 8b）；請求端可在 Data Collection requirements 指定 frequency of reporting，但沒有定義參數 |
 
 我用關鍵字搜尋 TS 23.436 和 TS 23.482，「formatting」「muting」「bulk」「MFAF」「clubbing」都沒有出現。
 
@@ -77,7 +88,11 @@
 
 ### RC3：沒有「資料品質與資料價值」的概念
 
-- **【規格】** 兩份規格都沒有出現「data quality」。TS 23.436 的 data producer profile 只描述儲存期限、是否支援匿名化、資料產生速率與時程（TS 23.436 中 data producer profile 相關表格）。**沒有準確度、覆蓋率、偏差、新鮮度、與目標任務的相關性等欄位。**
+- **【規格】** 兩份規格都沒有出現「data quality」。TS 23.436 的 data producer profile（Table 8.2.4.8-1、8.12.3.7-1）包含：
+  - producer type、data type、role（generating entity、original producer、repository）、Original producer ID；
+  - **Data freshness**：當 role 不是 original producer 或 generating entity 時，資料產生後多久才能在該 producer 取得，或改填 producer 支援的收集速率；
+  - Data producer capability：儲存期限、是否支援匿名化、資料產生速率與時程。
+  - **沒有準確度、覆蓋率、偏差、缺值率、與目標任務的相關性等欄位。** 請求端的 Data Collection requirements 雖然可以指定「level of accuracy of data」，但那是需求，不是對 producer 資料品質的描述。
 - **【規格】** 研究階段有提到「同一指標的多來源資料先正規化與驗證，剔除不一致樣本」（TR 23.700-36 6.3.1.2.3 step 4），但沒有進入 TS。
 - **【規格】** AIMLE 選 FL 成員的條件是能力、可用時間、資料量與特徵對齊（TS 23.482 8.18.2 step 9、8.19）；資料集可用性只描述「大小、新舊、特徵、ID」。**沒有「這份資料對模型有多少貢獻」的衡量。**
 - **【文獻】** FL 文獻已經有 Shapley、gradient-based、Wasserstein 等資料價值與 client 貢獻評估方法（arXiv 2504.16668、2406.00569、2311.05304）；考慮資料品質的無線 FL client 選擇也有研究（arXiv 2208.04322）。但都沒有對應到 3GPP 的介面。
@@ -87,26 +102,46 @@
 
 - **【規格】** AIMLE 收集模型效能資訊時，可以「directly or via A-DCCF data collection service」，但「How the AIMLE server can trigger A-DCCF data collection service will be further discussed during normative phase」（TS 23.482 8.31 step 3，Editor's Note）。
 - **【規格】** ML repository 的模型資訊會記錄「訓練用了哪些資料（data sources, volume, freshness）」（TS 23.482 8.11 相關 IE），但**這些資訊和 A-ADRF 的資料集之間沒有任何關聯機制**。AIMLE 的 Dataset ID 也沒有定義和 ADAE 的 Data Collection Event ID 之間的關係。
+- **【規格】** 研究階段曾設計兩者的銜接，但正式規格沒有保留：
+  - TR 23.700-82 Solution #21 把 data collection 列為 AIMLE 資料管理的一種。AIMLE client 依 TS 23.436 的程序訂閱收集，並註明「Data collection can reuse A-DCCF procedures」（8.21.1 step 4、6）。
+  - 結論是「can be considered for normative work with modification as needed」（12.3）。
+  - 正式規格 TS 23.482 8.15 只保留 data preparation、data analysis 和 data drift detection，**沒有 data collection 這一類**，資料收集改為前置條件（8.15.2 前置條件 2）。
 - **【推論】** 兩者都從 UE 經 EVEX 收集資料，又各自維護資料集。同一個 UE 的同一類資料，可能被 ADAE（為了分析）和 AIMLE（為了訓練）**各收一次**。資料的血緣（lineage）也斷了：模型劣化時（TS 23.436 8.19、TS 23.482 8.22），沒辦法回頭追是哪一批資料造成的，也沒辦法只補收缺少的部分。
 
 ### RC5：UE 端收集的成本、能耗與隱私沒有納入收集決策
 
 - **【規格】** UE 的資料收集需要使用者同意（TS 23.436 8.16 NOTE 1；TS 23.482 中也有 user consent 的 NOTE）。匿名化在 producer profile 中只是一個能力旗標。
 - **【規格】** SEALDD 已經有 Background Data Transfer，可以在非尖峰時段以較低成本傳輸（TS 23.433 4.7、9.11），也有自適應傳輸（9.13，會借助 AIMLE）。**但 ADAE 和 AIMLE 的收集流程都沒有引用 BDT 來排程大量上傳。**
-- **【規格】** ADAE 已經有「AIMLE client energy sustainability analytics」（TS 23.436 8.23）和 AI/ML 能耗分析（8.22），但這些是**給 AIMLE 選成員用的，不是給收集規劃用的**。
-- **【推論】** UE 端的取樣率、上傳時機、是否先在端側摘要，目前都是實作決定，沒有一個元件同時考慮能耗、成本和隱私。
+- **【規格】** ADAE 已經有「AIMLE client energy sustainability analytics」（TS 23.436 8.23）和 AI/ML 能耗分析（8.22），consumer 是 VAL server 或 AIMLE server（8.22.2、8.23.2 step 1），**規格沒有把它們用在 ADAE 或 AIMLE 的收集規劃上**。
+- **【規格】** SEAL 位置管理已經把能耗納入回報決策：
+  - LMS 依 VAL server 的 energy requirement，選擇位置資料來自 location management client 還是 3GPP CN（TS 23.434 9.3.5 step 2a）；
+  - 要求 adaptive reporting 並帶 energy saving indicator 時，LMS 向 ADAES 訂閱 energy information analytics，再用來調整回報頻率或位置精度（9.3.5 step 2b）。
+  - **但只限位置資料**；調整依據是 VAL service ID、VAL server ID、energy requirement、移動性分析和能耗分析，不包含傳輸成本與隱私。
+- **【推論】** ADAE 和 AIMLE 一般資料的 UE 端取樣率、上傳時機、是否先在端側摘要，目前都是實作決定，沒有一個元件同時考慮能耗、成本和隱私。
 
 ### RC6：跨層、跨域沒有統一的資料框架
 
 - **【文獻】** Samsung 指出 5G 的問題在於「lack of unified data collection and transfer mechanism among different domains within 3GPP」。6G 的資料框架希望統一 SA2（核心網）、RAN1/2（無線）、SA5（管理）的資料收集與傳遞（Samsung Research blog）。
 - **【文獻】** 6G 的 SA2 研究（TR 23.801-01）有 24 個 key issue，要求把「model and data handling」作為架構服務。CT 也有「unified core data framework」的研究項目；SA6 的 6G 研究是 TR 23.801-02（arXiv 2610.05694，狀態快照日期為 2026-06-30）。
-- **【推論】** ADAE 等於在應用層「複製」了一套 NWDAF 式的框架（ADAES 對 NWDAF、A-DCCF 對 DCCF、A-ADRF 對 ADRF），但只複製了一部分（見 RC2）。這兩套框架之間也只能透過 NEF 與 AF 介面互通。6G 是重新設計的時機。
+- **【規格】** 兩套框架的銜接只有兩處：
+  - ADAES 以 AF 身分訂閱 NEF、SMF、PCF、NWDAF（TS 23.436 8.2.2 NOTE）；
+  - A-DCCF、A-ADRF 可依設定只用來對接特定資料來源，例如 5GC、OAM（5.3）。
+  - **TS 23.436 沒有提到 5GC 的 DCCF 或 ADRF，A-DCCF 與 DCCF 之間沒有協調或去重複機制。**
+- **【推論】** ADAE 等於在應用層「複製」了一套 NWDAF 式的框架（ADAES 對 NWDAF、A-DCCF 對 DCCF、A-ADRF 對 ADRF），但只複製了一部分（見 RC2），而且兩套框架之間各自收集、各自去重複。6G 是重新設計的時機。
 
 ### RC7：收集與模型效能之間是開環
 
-- **【規格】** 模型劣化偵測與重訓已經有規範（TS 23.436 8.19、8.20；TS 23.482 8.21、8.22），觸發的動作是「重訓、換模型、換成員」（TS 23.482 8.22 step 6）。**但沒有任何「調整收集計畫」的動作**，例如補收哪些特徵、提高哪一區的取樣率、停收哪些無效的事件。
-- **【規格】** AIMLE 8.15 已經能做 **data drift detection**（client 端執行，TS 23.482 8.15），TR 23.700-83 也在強化這部分。但偵測結果只回報給消費者，沒有連回收集端。
-- **【推論】** 偵測漂移所需的訊號都已經存在，缺的是「把這些訊號轉成收集策略」的元件。
+- **【規格】** 模型劣化偵測與重訓已經有規範（TS 23.436 8.19、8.20；TS 23.482 8.21、8.22、8.30）。觸發的動作包括：
+  - 由同一或不同 client 訓練新模型或重訓、終止服務並以新模型重新啟動、請表現劣化的 client 加強訓練協作（TS 23.482 8.22.2 step 6）；
+  - 換模型或 transfer learning（8.30.2 step 6）。
+  - **但這些動作都不包含「調整收集計畫」**，例如補收哪些特徵、提高哪一區的取樣率、停收哪些無效的事件。
+- **【規格】** AIMLE 8.15 已經能做 **data drift detection**（client 端執行，TS 23.482 8.15），TR 23.700-83 也在強化這部分。偵測結果會被 AIMLE server 用來決定換模型或 transfer learning（8.30.2 step 5–6），但**沒有連回收集端**。
+- **【規格】** 研究階段曾有收集端的閉環：TR 23.700-82 Solution #21 中，AIMLE server 依 client 回報判斷收集到的樣本數不夠時，可以重複步驟 4–7 補收資料（8.21.1 step 7）。正式規格 TS 23.482 8.15 沒有保留這一段。
+- **【規格】** SEAL 中已有「依分析調整收集設定」的正式先例，就是 LMS 的 adaptive reporting：
+  - LMS 結合 NWDAF 的 UE mobility analytics 與 ADAES 的 energy information analytics，例如決定要提高或降低回報頻率、改變位置精度（TS 23.434 9.3.5 step 2b）；
+  - DIRECT UPDATE 由 LMS 直接決定回報設定；
+  - SUGGESTIVE UPDATE 先沿用 VAL server 的設定，再動態調整，並把建議送給 VAL server，VAL server 接受後才生效（9.3.5 step 2b、9.3.20）。
+- **【推論】** 偵測漂移所需的訊號都已經存在，缺的是「把這些訊號轉成收集策略」的元件。LMS 顯示 3GPP 已經接受「分析 → 建議收集設定 → consumer 核准 → 執行」的模式，但只做到位置資料，決策方式也交給實作；ADAE 和 AIMLE 的一般資料收集沒有對應的機制。
 
 ### 成因總覽
 
@@ -129,10 +164,10 @@
 | # | 元件 | 解決的成因 | 建議位置 | 功能 |
 |---|---|---|---|---|
 | **C1** | **收集規劃器（Collection Planner）** | RC1、RC3、RC7 | ADAES 內部，或 A-DCCF 的前端；AIMLE 透過 AIML-X 共用 | 輸入分析或訓練目標（Analytics ID 或 ML task、準確度與信心要求、區域與時間）、資料生產者目錄、成本與隱私限制；**輸出收集計畫**：收哪些事件、找誰收、取樣率、處理指令、送往哪裡、用 FA 還是集中收集。**這是 agent 最適合擔任的角色** |
-| **C2** | **擴充的 Data Producer Profile 與資料目錄（Dataset Catalog）** | RC3、RC4 | A-ADRF 與 ML repository 共用的 metadata 層 | 在 profile 中加入品質欄位（準確度、覆蓋率、新鮮度、缺值率、偏差）；資料集登錄 lineage（由哪些 Data Collection Event 產生、被哪些 ML model ID 用過）；**讓 AIMLE 的 Dataset ID 和 ADAE 的資料能互相對應** |
-| **C3** | **A-DCCF 減量指令集** | RC2 | A-DCCF，必要時加上應用層的 messaging 元件 | 移植 TS 23.288 5A.4 的格式化與摘要處理、6.2.6.1 的 bulked data（**區分 training 與 inference**）、6.2.7 的 muting；**正式定義 `Process requirements` 的內容** |
+| **C2** | **擴充的 Data Producer Profile 與資料目錄（Dataset Catalog）** | RC3、RC4 | A-ADRF 與 ML repository 共用的 metadata 層 | 在 profile 中加入品質欄位（準確度、覆蓋率、缺值率、偏差；新鮮度沿用現有的 Data freshness）；資料集登錄 lineage（由哪些 Data Collection Event 產生、被哪些 ML model ID 用過）；**讓 AIMLE 的 Dataset ID 和 ADAE 的資料能互相對應** |
+| **C3** | **A-DCCF 減量指令集** | RC2 | A-DCCF 與 data producer，必要時加上應用層的 messaging 元件 | 移植 TS 23.288 5A.4 的 DCCF 格式化與摘要處理；參考 6.2.6.1 NWDAF 的 bulked data（**區分 training 與 inference**）；6.2.7 的 muting 需要 producer（VAL server、ADAE client）支援，不只是擴充 A-DCCF；**正式定義 `Process requirements` 的內容** |
 | **C4** | **端側運算與 Federated Analytics 模式** | RC5、RC2 | ADAE client，重用 AIMLE client 的 8.15 機制 | 讓 ADAES 能把「統計查詢」派給 client 在本地計算，只回傳摘要。見第 4 節 |
-| **C5** | **收集閉環控制器** | RC7 | 與 C1 合併，或作為 C1 的觸發來源 | 訂閱 TS 23.436 8.19、8.20 和 TS 23.482 8.15（drift）、8.22 的結果，觸發 C1 重新規劃 |
+| **C5** | **收集閉環控制器** | RC7 | 與 C1 合併，或作為 C1 的觸發來源 | 訂閱 TS 23.436 8.19、8.20 和 TS 23.482 8.15（drift）、8.22、8.30 的結果，觸發 C1 重新規劃 |
 | **C6** | **傳輸排程整合** | RC5 | SEALDD | 大量訓練資料或 bulked data 走 BDT（TS 23.433 9.11）；即時推論資料走自適應傳輸（9.13） |
 | **C7** | **ADAE 與 AIMLE 的收集介面** | RC4 | AIML-X 與 A-DCCF 之間 | 補上 TS 23.482 8.31 的 Editor's Note：讓 AIMLE 可以向 A-DCCF 訂閱，A-DCCF 再做跨 ADAE 與 AIMLE 的去重複 |
 | **C8** | **隱私、同意與政策引擎** | RC5 | ADAES 或 A-DCCF | 把 user consent、匿名化、資料最小化原則變成 C1 的硬性限制條件 |
@@ -157,7 +192,7 @@
 
 | # | 介入點 | 做法 | 為什麼有價值 | 依據 |
 |---|---|---|---|---|
-| **F1** | **ADAE 統計分析改用 Federated Analytics** | ADAES 的大部分輸出是統計量，例如平均或峰值吞吐量、E2E 延遲、jitter、PER（TS 23.436 8.2.2 step 6）。這類查詢可以交給 ADAE client 在本地計算，再做安全聚合，不必上傳逐筆量測 | 直接降低 UE 上傳量與隱私風險。**AIMLE 8.15 的「data analysis」已經讓 client 在本地計算各特徵的統計量並由 server 彙整**，等於 FA 已經存在於 AIMLE，只是 ADAE 沒有接上 | 【規格】TS 23.482 8.15；【文獻】FA for 6G（arXiv 2401.03878）；【推論】把兩者接起來 |
+| **F1** | **ADAE 統計分析改用 Federated Analytics** | ADAES 使用的輸入資料多半是統計量，例如平均或峰值吞吐量、平均或最大 E2E 延遲、jitter、平均應用層 PER（TS 23.436 8.2.2 step 6、8b），輸出也是「stats or prediction」（step 11）。這類查詢可以交給 ADAE client 在本地計算，再做安全聚合，不必上傳逐筆量測 | 直接降低 UE 上傳量與隱私風險。**AIMLE 8.15 的「data analysis」已經讓 client 在本地計算各特徵的統計量並由 server 彙整**，等於 FA 已經存在於 AIMLE，只是 ADAE 沒有接上 | 【規格】TS 23.482 8.15；【文獻】FA for 6G（arXiv 2401.03878）；【推論】把兩者接起來 |
 | **F2** | **ADAE 的 ML-enabled analytics 用 HFL，不先集中收集** | ADAES 經 AIML-X 請 AIMLE 用 HFL 訓練某個 Analytics ID 的模型，資料留在 ADAE client 或 edge ADAES，不先送進 A-ADRF | 減少集中收集；適合各區資料分布不同、又不能出域的情況 | 【規格】TS 23.436 5.2.4、TS 23.482 8.12；【推論】需要把 Dataset ID 對應到 ADAE 的資料（C2） |
 | **F3** | **應用層與網路層之間用 VFL，取代資料搬移** | ADAES 以 AF 身分和 NWDAF 做 VFL：應用特徵（QoE、應用負載）留在 ADAE，網路特徵（QoS、移動性）留在 NWDAF | 現在 ADAES 要經 NEF 訂閱 NWDAF 的分析或資料（8.2.2 NOTE），屬於跨域資料搬移。VFL 只交換中間結果與梯度 | 【規格】TS 23.288 5.4、6.2H（支援 AF）；【推論】TS 23.436 沒有提到這種用法，是新的組合 |
 | **F4** | **用 FL 學習「收集策略」本身** | 多個 edge ADAES（TS 23.436 Annex A.3、A.4 的 edge 與協同部署）各自學習「哪些事件或取樣率對準確度有用」的策略模型，再以 FL 聚合 | 收集策略具有地區性，但又可以共享通用的規律；不需要集中各區的原始資料 | 【推論】屬於研究型方向 |
@@ -189,12 +224,13 @@
 
 ### L1：與標準相容的補強（短期，可以寫成 CR 或 3GPP 文稿）
 
-1. **定義 A-DCCF 的 `Process requirements`**：直接移植 TS 23.288 5A.4 的 Formatting Instructions 和 Processing Instructions。
-2. **新增應用層 bulked data**：把 TS 23.288 6.2.6.1 的 raw 與 pre-processed 樣本、training 與 inference 用途區分帶進 A-DCCF 和 A-ADRF 的 API。
+1. **定義 A-DCCF 的 `Process requirements`**：直接移植 TS 23.288 5A.4 的 Formatting Instructions 和 Processing Instructions（stage 3 可參考 TS 29.574 的 `FormattingInstruction`、`ProcessingInstruction`）。
+2. **新增應用層 bulked data**：把 TS 23.288 6.2.6.1（NWDAF 的 bulked data，目前只有 stage 2）的 raw 與 pre-processed 樣本、training 與 inference 用途區分帶進 A-DCCF 和 A-ADRF 的 API。
 3. **新增 ADAE client 的 muting 與 fetch 機制**（參考 TS 23.288 6.2.7）：讓 UE 先在本地暫存，由 ADAES 依需要取回。
 4. **在 Data Producer Profile 中增加品質欄位**（C2 的最小版本）。
 5. **補上 TS 23.482 8.31 的 Editor's Note**：定義 AIMLE 觸發 A-DCCF 收集的流程與 IE（C7）。
 6. 在 ADAE 的收集流程中加上 **SEALDD BDT 的選項**（C6）。
+7. **把 SEAL LMS 的 adaptive reporting 推廣到 ADAE**（參考 TS 23.434 9.3.5、9.3.20）：讓 ADAES 或 A-DCCF 依分析結果建議調整 Data Collection requirements（例如回報頻率），consumer 核准後生效。這是最接近現有標準的閉環做法，可以當作 C5 的最小版本。
 
 ### L2：架構增強（中期，可以作為 6G SA6 研究，TR 23.801-02 方向的提案）
 
@@ -208,6 +244,7 @@
 1. **Agent 型收集規劃器**：
    - 建議的設計原則（【推論】）是 **「agent 規劃、標準功能執行」**。agent 只產生結構化的收集計畫（可驗證的 JSON 或 IE 集合），實際的訂閱、去重複和減量，仍由 A-DCCF 等標準功能確定性地執行。
    - 這樣可以回應文獻中對 agentic 協定「non-deterministic and chatty」的疑慮（arXiv 2610.05694），也便於測試與互通。
+   - 這個模式在 SEAL 已有先例：LMS 的 SUGGESTIVE UPDATE 由 LMS 產生回報設定的建議，VAL server 核准後才執行（【規格】TS 23.434 9.3.20）。agent 可以定位成把這種「建議 → 核准 → 執行」流程推廣到一般資料，並加入成本與隱私限制（【推論】）。
    - Agent 可用的工具：
      - 查詢資料生產者目錄（C2）；
      - 查詢 A-ADRF 已有的資料，對應 TR 23.700-36 中「先找 repository」的步驟；
@@ -270,11 +307,11 @@
 
 | 項目 | 建議 |
 |---|---|
-| **Baseline** | (B0) OAM 靜態對應、全量訂閱；(B1) B0 + A-DCCF 去重複（現行 TS 23.436）；(B2) B1 + 移植的 5GC 減量工具（L1）；(B3) 規則式規劃器；(B4) RL 或 bandit 規劃器；**(Ours)** agent 規劃器 + FA/FL 選擇 |
+| **Baseline** | (B0) OAM 靜態對應、全量訂閱；(B1) B0 + A-DCCF 去重複（現行 TS 23.436）；(B2) B1 + 移植的 5GC 減量工具（L1）；(B3) 規則式規劃器（決策輸入可參考 SEAL LMS adaptive reporting：energy requirement、移動性與能耗分析）；(B4) RL 或 bandit 規劃器；**(Ours)** agent 規劃器 + FA/FL 選擇 |
 | **效率指標** | 信令與通知數、上傳位元組數（UE 端與 DN 端分開）、UE 能耗、A-ADRF 儲存量、重複收集比例 |
 | **效益指標** | 分析準確度與信心水準、模型準確度、資料新鮮度、從請求到產出分析或模型的時間 |
 | **Agent 專屬指標** | 規劃的正確率（計畫能否通過政策與同意檢查）、token 和延遲成本、在新的 Analytics ID 上的泛化能力 |
-| **情境** | VAL server 效能分析（TS 23.436 8.2）、edge load（8.7）、ADAE 與 NWDAF 的 VFL（F3）、模型劣化後補收資料（RC7） |
+| **情境** | VAL server 效能分析（TS 23.436 8.2）、edge load（8.8）、ADAE 與 NWDAF 的 VFL（F3）、模型劣化後補收資料（RC7） |
 | **實驗平台** | 我**沒有找到開源的 ADAE 或 AIMLE 實作**。可行的方式：以 free5GC 加開源 NWDAF（arXiv 2606.11877、2601.01838）作為網路側，**自建輕量的 ADAES、A-DCCF、A-ADRF 模擬層**，FL/FA 用 Flower 等框架 |
 
 ### 6.4 風險與開放問題
@@ -289,15 +326,19 @@
 
 ## 7. 參考資料
 
-### 3GPP 規格（本機）
-- TS 23.436 V20.2.0：5.2.4、5.3、5.5、8.2.2、8.2.4、8.10、8.12、8.16、8.19、8.20、8.22、8.23、Annex A
+### 3GPP 規格（本機 `spec/`；TS 29.549、TS 29.574 取自網路）
+- TS 23.436 V20.2.0：5.2.4、5.3、5.5、8.2.2、8.2.4、8.4、8.8、8.10、8.12、8.14、8.15、8.16、8.19、8.20、8.22、8.23、Annex A
 - TR 23.700-36 V18.1.0：4.3（KI#3）、5.1.3、6.3（Solution #2）、9.2
-- TS 23.482 V20.3.0：8.3、8.9、8.11、8.12、8.14、8.15、8.18、8.19、8.22、8.31、8.35、8.36
+- TS 23.482 V20.3.0：8.3、8.9、8.11、8.12、8.14、8.15、8.18、8.19、8.22、8.30、8.31、8.35、8.36
 - TS 23.288 V20.2.0：5.3、5.4、5A.1、5A.2、5A.4、6.2.6.1、6.2.7、6.2.8、6.2C、6.2H
 - TS 23.433 V20.4.0：4.4、4.6、4.7、9.11、9.13
+- TS 23.434 V20.1.0：9.3.5、9.3.20、19.1、20.1
+- TR 23.700-82 V19.1.0：8.21（Solution #21）、12.3
+- TS 29.549 V20.1.0：7.10.13（SS_ADCCF_DataCollection）
+- TS 29.574 V20.1.0：5.1.6.2.6–5.1.6.2.8、5.1.6.3.3–5.1.6.3.4
 
 ### 標準相關（網路）
-- TR 23.700-83 AIMLE Phase 2（whatthespec）：https://whatthespec.net/friendlyspec/spec/23.700-83/20.1.0
+- TR 23.700-83 V20.2.0 AIMLE Phase 2（whatthespec）：https://whatthespec.net/friendlyspec/spec/23.700-83/20.2.0
 - TEI19 ADAES work item：https://whatthespec.net/3gpp/wi/1070004-tei19-adaes
 - 3GPP Rel-19 Summary（2026-04）：https://www.3gpp.org/ftp/Information/presentations/presentations_2026/2026_04_Rel19.pdf
 - TR 23.801-01 status：https://www.3gpp.org/dynareport/23801-01.htm
